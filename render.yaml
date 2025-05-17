@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: fake-news-api
+    env: python
+    region: oregon
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port 10000
+    plan: free
+    envVars:
+      - key: MONGO_DETAILS
+        value: mongodb+srv://gaikwadom992:xqSKA1ztPUdljf8R@cluster0.nzncblj.mongodb.net/newsDB?retryWrites=true&w=majority&appName=Cluster0

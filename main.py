@@ -1,49 +1,50 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from transformers import pipeline
-from motor.motor_asyncio import AsyncIOMotorClient
-from datetime import datetime
+from pymongo import MongoClient
 
-# Load the fake news detection model
-MODEL_NAME = "jy46604790/Fake-News-Bert-Detect"
-classifier = pipeline("text-classification", model=MODEL_NAME, tokenizer=MODEL_NAME, framework="pt")
+# ✅ Public, lightweight zero-shot model
+model_name = "valhalla/distilbart-mnli-12-1"
 
+classifier = pipeline("zero-shot-classification", model=model_name, framework="pt")
 
 # MongoDB setup
-MONGO_DETAILS = "mongodb://localhost:27017"
-client = AsyncIOMotorClient(MONGO_DETAILS)
-database = client.newsDB
-collection = database.predictions
+client = MongoClient("mongodb+srv://gaikwadom992:xqSKA1ztPUdljf8R@cluster0.nzncblj.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0")
+db = client.newsDB
+collection = db.predictions
 
-# FastAPI setup
-app = FastAPI()
+app = FastAPI()  # enables default docs at /docs
 
-# Request schema
+
+
 class NewsInput(BaseModel):
     text: str
 
-# POST /predict endpoint
 @app.post("/predict")
-async def predict_news(news: NewsInput):
-    result = classifier(news.text)[0]
-    label = result['label']
-    score = float(result['score'])
+def predict(news: NewsInput):
+    try:
+        candidate_labels = ["fake news", "real news"]
+        result = classifier(news.text, candidate_labels)
 
-    # Save prediction to MongoDB
-    await collection.insert_one({
-        "text": news.text,
-        "label": label,
-        "score": score,
-        "timestamp": datetime.utcnow()
-    })
+        scores = result['scores']
+        labels = result['labels']
 
-    return {"label": label, "confidence": round(score, 4)}
+        top_label = labels[0]
+        top_score = round(scores[0] * 100, 2)
+        numeric_label = 0 if top_label == "fake news" else 1
 
-# GET /logs endpoint
-@app.get("/logs")
-async def get_logs():
-    cursor = collection.find({}, {"_id": 0})
-    logs = []
-    async for doc in cursor:
-        logs.append(doc)
-    return {"logs": logs}
+        collection.insert_one({
+            "text": news.text,
+            "raw_label": top_label,
+            "numeric_label": numeric_label,
+            "confidence": top_score
+        })
+
+        return {
+            "label": numeric_label,
+            "raw_label": top_label,
+            "confidence": f"{top_score} %"
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
